@@ -69,23 +69,37 @@ already checked --- it's flagged as outstanding.
 
 ## The moments that mattered
 
-This section is not yet re-filled for the Ninefold Tower rewrite. The redesign
-above hasn't been committed yet (the work explicitly stopped short of
-committing or pushing pending review), and `pnpm check:evidence` requires
-every citation here to resolve to a real commit in this repo --- so citing the
-*previous* mechanic's commits under a section that now describes a different
-game would misrepresent what those commits actually did. Once the redesign is
-committed, replace this section with 2--4 real moments drawn from that
-history. Strong candidates already visible in the diff: the Floor 2 ("Hou Yi")
-redesign from an auto-clearing rule that made the "don't shoot the last sun"
-failure mechanically unreachable, into a grace-window that keeps the last sun
-alive and clickable so restraint is an active, failable choice; the Floor 4
-listener-removal bug where `destroy()` tried to remove event listeners with
-freshly-created closures instead of the ones actually attached, a real leak
-fixed by naming the handlers; and the Floor 9 bug where the escorted sphere
-never reset to the corridor's start position after the discern phase, so the
-"escort from the beginning" challenge could silently start from wherever the
-sphere happened to be placed.
+The whole rewrite landed as one commit,
+[`a1755a4`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/a1755a4),
+since none of it was usable mid-way through --- there was no working
+intermediate state worth checkpointing separately. Three decisions inside it
+are worth calling out on their own:
+
+Splitting `tower.ts` (the intro/floor/dying/rewinding/ending saga) away from
+`floors/rules.ts` (the pure per-floor mechanics) away from the nine
+presentation modules was the choice that made nine different mechanics
+tractable at all. `spec/tower.test.ts` and `spec/floor-rules.test.ts` test
+real game logic --- floor-9-reaches-ending, death resetting every orb, the
+"shooting the last sun always fails" rule --- with no DOM in the loop, the
+same shape as the previous prototype's `spec/game.test.ts`.
+
+Floor 9's escort leg had a real bug caught before it was ever run: the
+escorted sphere's position was left wherever it happened to be after the
+discern phase instead of being reset to the corridor's start, so "escort it
+from the beginning" could silently start partway through. Fixing it meant
+`beginEscort()` explicitly resetting the figure's coordinates before the
+escort phase starts, rather than trusting whatever state the discern phase
+left behind.
+
+Floor 4 (Sisyphus) went through a real playtest correction, not a
+self-caught one: the first version let the stone roll back down the same
+diagonal it climbed and failed almost immediately once it passed the foot of
+the ramp, which read as "falls too fast" and as an unfair cliff-edge rather
+than a slope. The fix split the physics in two --- gravity and a real terminal
+speed while still on the incline, friction settling the stone on a flat
+landing once it's off the ramp --- so there's a genuine horizontal plane to
+recover on before the fail edge, matching what playtesting actually asked
+for.
 
 ## Before you ship
 
