@@ -2,11 +2,11 @@
 <html lang="en-AU">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>COMP4020 prototype</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>One Button Too Many</title>
     <meta
       name="description"
-      content="Replace this with one sentence saying what this page is. A search result and a link preview both show it."
+      content="A short perception game: press the one real button, again and again, as the page makes that harder to tell."
     />
 
     <!--
@@ -23,15 +23,18 @@
   <body>
     <header>
       <nav aria-label="Primary">
-        <a href="./">Home</a>
+        <a href="./">One Button Too Many</a>
       </nav>
     </header>
     <main>
-      <h1>COMP4020 prototype</h1>
-      <p>
-        Replace this with your prototype. This week's brief is on the course website;
-        <code>spec/README.md</code> explains how the checks in this repo relate to it.
-      </p>
+      <h1 class="visually-hidden">One Button Too Many</h1>
+      <div id="stage" class="stage">
+        <div id="end-screen" class="end-screen" aria-live="polite">
+          <h2 id="end-title"></h2>
+          <p id="end-stats"></p>
+          <p class="hint">press anywhere to try again</p>
+        </div>
+      </div>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>
