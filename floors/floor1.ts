@@ -2,8 +2,13 @@
 // interactive. Deliberately trivial; it establishes the visual language
 // every later floor builds on.
 import { makeSphere, place, raf, onTap, rectOf, type FloorContext, type FloorController } from "./shared.ts";
+import { showFloorMyth } from "./caption.ts";
 
 export function mount(container: HTMLElement, ctx: FloorContext): FloorController {
+  const myth = showFloorMyth(container, {
+    title: "Awakening",
+    text: "Everything begins with a first touch.",
+  });
   const sphere = makeSphere("target");
   sphere.classList.add("sphere--breathe");
   container.appendChild(sphere);
@@ -25,6 +30,7 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
   return {
     destroy(): void {
       stop();
+      myth.destroy();
       sphere.remove();
     },
   };

@@ -3,7 +3,8 @@
 // is the old game's entire mechanic, re-skinned into myth — the pointer
 // deception toolkit is a direct reuse of render.ts's original system.
 import { placeButtons } from "../placement.ts";
-import { pickTrue } from "./rules.ts";
+import { pickTrue, assignFloor8Qualities } from "./rules.ts";
+import { showStaticFloorMyth } from "./caption.ts";
 import {
   makeSphere,
   place,
@@ -11,13 +12,11 @@ import {
   onTap,
   rectOf,
   createDeceiver,
-  type PointerQuality,
   type FloorContext,
   type FloorController,
 } from "./shared.ts";
 
 const COUNT = 5;
-const QUALITIES: PointerQuality[] = ["authentic", "delayed", "exaggerated", "mirrored", "none"];
 
 interface Figure {
   id: string;
@@ -29,8 +28,17 @@ interface Figure {
 }
 
 export function mount(container: HTMLElement, ctx: FloorContext): FloorController {
+  const myth = showStaticFloorMyth(container, {
+    title: "Floor VIII · The True and False Monkey King",
+    lines: [
+      "A demon may copy the form, but never the nature.",
+      "The true one does not flee, reverse, or perform.",
+      "It only responds to your approach.",
+    ],
+  });
   const positions = placeButtons({ count: COUNT, minDistance: 0.24, margin: 0.14, rng: ctx.rng });
   const trueIndex = Math.floor(ctx.rng() * COUNT);
+  const qualities = assignFloor8Qualities(trueIndex, COUNT);
   const figures: Figure[] = [];
   const pointer = { x: -9999, y: -9999, active: false };
   let resolved = false;
@@ -40,7 +48,7 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
     const el = makeSphere(isTrue ? "target" : "decoy");
     el.classList.add("sphere--figure");
     container.appendChild(el);
-    const quality = isTrue ? "authentic" : QUALITIES[1 + (i % (QUALITIES.length - 1))]!;
+    const quality = qualities[i]!;
     const figure: Figure = {
       id: `figure-${i}`,
       el,
@@ -73,7 +81,7 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
     pointer.active = false;
   });
 
-  const stop = raf((_dt, t) => {
+  const stop = raf((dt, t) => {
     const rect = rectOf(container);
     const size = Math.min(rect.width, rect.height) * 0.14;
     for (const figure of figures) {
@@ -81,13 +89,13 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
       const bobY = figure.y + 0.012 * Math.cos(t * 0.42 + figure.bobPhase);
       const cx = bobX * rect.width;
       const cy = bobY * rect.height;
-      const { tiltX, tiltY, magX, magY } = figure.deceiver.update(cx, cy, size, pointer);
+      const { tiltX, tiltY, magX, magY, scale } = figure.deceiver.update(cx, cy, size, pointer, dt);
       place(
         figure.el,
         bobX,
         bobY,
         rect,
-        `translate(${magX}px, ${magY}px) rotateX(${tiltX}deg) rotateY(${tiltY}deg)`,
+        `translate(${magX}px, ${magY}px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) scale(${scale ?? 1})`,
       );
     }
   });
@@ -95,6 +103,7 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
   return {
     destroy(): void {
       stop();
+      myth.destroy();
       for (const f of figures) f.el.remove();
     },
   };

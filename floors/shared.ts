@@ -71,7 +71,15 @@ export function onTap(el: HTMLElement, handler: (ev: PointerEvent) => void): voi
 // Floor 8 ("True and False Monkey King") and Floor 9's discern leg are this
 // mechanic re-skinned into myth: every decoy imitates the true sphere's
 // pointer response with one deliberate flaw.
-export type PointerQuality = "authentic" | "delayed" | "exaggerated" | "mirrored" | "none";
+export type PointerQuality =
+  | "authentic"
+  | "delayed"
+  | "exaggerated"
+  | "mirrored"
+  | "none"
+  | "panic"
+  | "orbit"
+  | "pulse";
 
 export interface PointerState {
   x: number;
@@ -84,6 +92,8 @@ export interface Deception {
   tiltY: number;
   magX: number;
   magY: number;
+  /** Uniform scale multiplier, 1 = resting size. Only "pulse" moves this. */
+  scale?: number;
 }
 
 export function createDeceiver(quality: PointerQuality) {
@@ -91,12 +101,21 @@ export function createDeceiver(quality: PointerQuality) {
   let tiltY = 0;
   let magX = 0;
   let magY = 0;
+  let orbitAngle = 0;
+  let panicBounce = 0;
+  let wasNear = false;
+  let pulsePhase = 0;
+  let scale = 1;
 
   return {
-    update(cx: number, cy: number, size: number, pointer: PointerState): Deception {
+    update(cx: number, cy: number, size: number, pointer: PointerState, dt = 1 / 60): Deception {
       if (!pointer.active || quality === "none") {
         tiltX = tiltY = magX = magY = 0;
-        return { tiltX, tiltY, magX, magY };
+        panicBounce = 0;
+        wasNear = false;
+        pulsePhase = 0;
+        scale += (1 - scale) * 0.2;
+        return { tiltX, tiltY, magX, magY, scale };
       }
 
       const dx = pointer.x - cx;
@@ -113,19 +132,61 @@ export function createDeceiver(quality: PointerQuality) {
       if (quality === "delayed") follow = 0.35;
       if (quality === "exaggerated") mult = 1.9;
       if (quality === "mirrored") invert = -1;
+      if (quality === "panic") {
+        follow = 1;
+        mult = 2.2;
+        invert = -1;
+      }
 
       const tiltMax = 9;
       const magnetMax = 10;
-      const wantTiltX = -ny * tiltMax * influence * mult * invert;
-      const wantTiltY = nx * tiltMax * influence * mult * invert;
-      const wantMagX = nx * magnetMax * influence * mult * invert;
-      const wantMagY = ny * magnetMax * influence * mult * invert;
+      let wantTiltX = -ny * tiltMax * influence * mult * invert;
+      let wantTiltY = nx * tiltMax * influence * mult * invert;
+      let wantMagX = nx * magnetMax * influence * mult * invert;
+      let wantMagY = ny * magnetMax * influence * mult * invert;
+
+      if (quality === "panic") {
+        // A short, decaying flinch fired the instant the pointer swings close,
+        // on top of the steady flee — reads as startled, not just repelled.
+        const near = influence > 0.5;
+        if (near && !wasNear) panicBounce = 1;
+        wasNear = near;
+        panicBounce *= Math.exp(-dt * 8);
+        wantMagX -= nx * magnetMax * 1.8 * panicBounce;
+        wantMagY -= ny * magnetMax * 1.8 * panicBounce;
+        const boundary = magnetMax * 3.2;
+        wantMagX = clamp(wantMagX, -boundary, boundary);
+        wantMagY = clamp(wantMagY, -boundary, boundary);
+      }
+
+      if (quality === "orbit") {
+        orbitAngle += dt * 2.6;
+        const orbitRadius = size * 0.9;
+        wantMagX = (dx + Math.cos(orbitAngle) * orbitRadius) * influence;
+        wantMagY = (dy + Math.sin(orbitAngle) * orbitRadius) * influence;
+        wantTiltX = -ny * tiltMax * influence;
+        wantTiltY = nx * tiltMax * influence;
+      }
 
       tiltX += (wantTiltX - tiltX) * follow;
       tiltY += (wantTiltY - tiltY) * follow;
       magX += (wantMagX - magX) * follow;
       magY += (wantMagY - magY) * follow;
-      return { tiltX, tiltY, magX, magY };
+
+      if (quality === "pulse") {
+        pulsePhase += dt * (0.6 + influence * 1.1);
+        const frac = pulsePhase % 1;
+        let wantScale: number;
+        if (frac < 0.25) wantScale = 1 + 0.25 * (frac / 0.25);
+        else if (frac < 0.5) wantScale = 1.25 - 0.3 * ((frac - 0.25) / 0.25);
+        else if (frac < 0.75) wantScale = 0.95 + 0.05 * ((frac - 0.5) / 0.25);
+        else wantScale = 1;
+        scale += (1 + (wantScale - 1) * influence - scale) * 0.5;
+      } else {
+        scale += (1 - scale) * 0.2;
+      }
+
+      return { tiltX, tiltY, magX, magY, scale };
     },
   };
 }

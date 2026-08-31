@@ -101,6 +101,75 @@ landing once it's off the ramp --- so there's a genuine horizontal plane to
 recover on before the fail edge, matching what playtesting actually asked
 for.
 
+## Later changes: Floor 8's hint, Floor 9's replacement, the Rewind Anchor
+
+Three further, targeted changes on top of the shipped nine-floor build, made
+without touching any floor's underlying mechanic except Floor 9's own.
+
+**Floor 8's hint** was too thin: one flat caption line risked either naming
+the answer outright or reading as throwaway flavour text nobody paused for.
+It's now a two-part staged reveal --- "The false can copy the shape. It cannot
+copy the heart." then, after a pause, "The true one does not flee, does not
+defy, does not perform. It only answers your approach." --- followed by a
+faint residual line once the caption settles, "Only its nature cannot be
+disguised." None of the three lines names a sphere, a position, or a specific
+behaviour; they exist to stretch how long the floor invites the player to
+watch before acting, which is the entire mechanic here (five figures with
+different observable tells: a magnetic authentic one, plus mirrored, panic,
+orbit and pulse decoys). `createDeceiver` and `assignFloor8Qualities` are
+untouched --- this was a caption and pacing change only.
+
+**Floor 9 was fully replaced**, not patched. The former "综合试炼"
+(discern-then-escort) leaned on the same deception toolkit as Floor 8 plus a
+corridor/obstacle chase, which made the tower's final floor read as "Floor 8
+again, now with walking" rather than a distinct climax. It's now Pangu
+splitting heaven and earth: three continuous stages inside one floor, with no
+on-screen phase labels. Breaking the chaos egg is a charge-then-release
+strike gated on *both* charge and release timing (`chaosStrikeOutcome`) ---
+deliberately unlike Floor 4's charge mechanic, which gates on power alone, so
+the final floor doesn't just repeat an earlier verb. Dividing heaven and
+earth is a drag against a constant pull back toward reunion
+(`driftHalfTowardCenter`), and supporting the pillar is a hold-steady contest
+against a lateral disturbance (`supportDisturbanceAt`). Failure inside any of
+the three stages is deliberately non-fatal on a first miss --- the egg shakes
+and re-arms, a collision drops back to the strike stage, a support collapse
+just resets the hold's progress --- and only escalates to `ctx.onFail()`
+after repeated failures within a stage (`CHAOS_INSTABILITY_LIMIT`,
+`COLLISION_LIMIT`, `COLLAPSE_LIMIT`), so a slow or exploratory attempt at the
+last floor isn't punished as bluntly as a wrong answer earlier in the tower
+would be. The ending gained one line to match: after "You have escaped," a
+quieter second line now appears --- "The chaos has opened. The cycle has
+ended." --- echoing 混沌已开，轮回已止 without reverting any of the rest of
+the ending back to Chinese.
+
+**The Rewind Anchor** is a new opt-in toggle (top-right, off by default, a
+real `<button role="switch">`) that changes what a death costs. Off, nothing
+changes from the original build: death rewinds all the way to Floor 1 with
+every orb reset. On, a death restarts only the floor the player was standing
+on, leaving already-cleared floors' orbs alone. This is deliberately not a
+DOM-side `if (checkbox.checked)` patch: `TowerState` carries `anchorEnabled`
+and a committed `rewindMode`, and `failFloor` reads the anchor preference and
+commits it onto the state at the exact moment of failure --- so toggling the
+switch mid-death-animation can never reach back and change an outcome that's
+already in flight. `finishRewind` then branches purely on that committed
+mode. This was a design decision made ahead of the fact, not a response to
+playtest feedback --- no one has played with the Anchor on yet, and this file
+won't claim otherwise; `spec/tower.test.ts`'s Anchor tests (off-behaviour,
+on-behaviour, and the toggle itself being inert until the next failure) are
+what stand in for that until a real playtest happens.
+
+What the tests for these three changes actually verify, and what they can't:
+`spec/deceiver.test.ts` confirms Floor 8's five behaviours are numerically
+distinct and identical at rest; `spec/floor-rules.test.ts` confirms Floor 9's
+gating math (charge+timing, half-collision, hold-completion) behaves as
+designed; `spec/tower.test.ts` confirms the Anchor's off/on branching and its
+non-retroactive commit timing. None of that is a substitute for playing it:
+whether Floor 9's three stages *feel* continuous rather than like three
+separate mini-games stitched together, whether the chaos egg's charge/timing
+window feels fair rather than fiddly, and whether the Anchor's shorter
+rewind reads as meaningfully different in the moment rather than just a
+number changing --- all of that is still outstanding and unclaimed here.
+
 ## Before you ship
 
 `pnpm check:evidence` verifies your citations resolve to real commits, that a

@@ -4,12 +4,17 @@
 // corridor for the full flight clears the floor.
 import { bandCenterAt, isWithinBand, clamp } from "./rules.ts";
 import { makeSphere, place, raf, rectOf, type FloorContext, type FloorController } from "./shared.ts";
+import { showFloorMyth } from "./caption.ts";
 
 const BAND_HALF_WIDTH = 0.14;
 const OUTSIDE_LIMIT = 0.75;
 const SURVIVE_SECONDS = 16;
 
 export function mount(container: HTMLElement, ctx: FloorContext): FloorController {
+  const myth = showFloorMyth(container, {
+    title: "Icarus",
+    text: "Fly too high, and the sun melts the wings. Fly too low, and the sea swallows him.",
+  });
   const corridor = document.createElement("div");
   corridor.className = "corridor";
   container.appendChild(corridor);
@@ -60,6 +65,7 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
   return {
     destroy(): void {
       stop();
+      myth.destroy();
       container.removeEventListener("pointermove", onPointerMove);
       corridor.remove();
       bird.remove();

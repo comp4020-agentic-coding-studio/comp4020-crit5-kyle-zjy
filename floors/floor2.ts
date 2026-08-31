@@ -4,6 +4,7 @@
 // clicking, which is why there's a grace window instead of an instant win.
 import { applySunShot, SUN_COUNT } from "./rules.ts";
 import { makeSphere, place, raf, onTap, rectOf, clamp, type FloorContext, type FloorController } from "./shared.ts";
+import { showFloorMyth } from "./caption.ts";
 
 interface Sun {
   el: HTMLDivElement;
@@ -17,6 +18,10 @@ interface Sun {
 const GRACE_MS = 1500;
 
 export function mount(container: HTMLElement, ctx: FloorContext): FloorController {
+  const myth = showFloorMyth(container, {
+    title: "Hou Yi and the Ten Suns",
+    text: "Ten suns rose together and scorched the earth. Hou Yi shot down nine, and spared one.",
+  });
   const suns: Sun[] = [];
   let remaining = SUN_COUNT;
   let resolved = false;
@@ -90,6 +95,7 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
   return {
     destroy(): void {
       stop();
+      myth.destroy();
       if (graceTimer !== null) window.clearTimeout(graceTimer);
       for (const sun of suns) sun.el.remove();
     },

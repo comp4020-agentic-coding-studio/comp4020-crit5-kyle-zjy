@@ -9,6 +9,7 @@ import {
   failFloor,
   beginRewind,
   finishRewind,
+  setAnchorEnabled,
   FLOOR_COUNT,
 } from "../tower.ts";
 
@@ -109,5 +110,61 @@ describe("death and time-reversal loop", () => {
     const playing = createTower(false);
     expect(beginRewind(playing)).toBe(playing); // floor, not dying
     expect(finishRewind(playing)).toBe(playing); // floor, not rewinding
+  });
+});
+
+describe("Rewind Anchor", () => {
+  it("toggling the preference alone never touches phase, floor or progress", () => {
+    let state = clearFloor(createTower(false)); // floor 2 (index 1), one orb cleared
+    const before = { ...state };
+    state = setAnchorEnabled(state, true);
+    expect(state.anchorEnabled).toBe(true);
+    expect(state.phase).toBe(before.phase);
+    expect(state.floor).toBe(before.floor);
+    expect(state.cleared).toEqual(before.cleared);
+  });
+
+  it("is a no-op (same reference) when set to its current value", () => {
+    const state = createTower(false);
+    expect(setAnchorEnabled(state, false)).toBe(state);
+  });
+
+  it("OFF: failing on floor 6 rewinds fully back to floor 1 with every orb reset", () => {
+    let state = createTower(false);
+    for (let i = 0; i < 5; i++) state = clearFloor(state); // clears floors 1-5, now on floor 6 (index 5)
+    expect(state.floor).toBe(5);
+    expect(state.cleared.filter(Boolean)).toHaveLength(5);
+
+    state = setAnchorEnabled(state, false);
+    state = finishRewind(beginRewind(failFloor(state)));
+
+    expect(state.phase).toBe("floor");
+    expect(state.floor).toBe(0);
+    expect(state.cleared.every((c) => c === false)).toBe(true);
+  });
+
+  it("ON: failing on floor 6 restarts only floor 6, preserving the first five orbs", () => {
+    let state = createTower(false);
+    for (let i = 0; i < 5; i++) state = clearFloor(state); // clears floors 1-5, now on floor 6 (index 5)
+
+    state = setAnchorEnabled(state, true);
+    state = finishRewind(beginRewind(failFloor(state)));
+
+    expect(state.phase).toBe("floor");
+    expect(state.floor).toBe(5); // still floor 6, not reset to floor 1
+    expect(state.cleared.slice(0, 5).every((c) => c === true)).toBe(true);
+    expect(state.cleared.slice(5).every((c) => c === false)).toBe(true);
+  });
+
+  it("commits the rewind mode at the moment of failure, not at rewind-finish time", () => {
+    let state = createTower(false);
+    for (let i = 0; i < 5; i++) state = clearFloor(state);
+    state = setAnchorEnabled(state, true);
+    state = failFloor(state); // commits "anchor"
+    state = setAnchorEnabled(state, false); // flipped mid-death; must not retroactively change this failure
+    state = finishRewind(beginRewind(state));
+
+    expect(state.floor).toBe(5); // still anchor behaviour for this failure
+    expect(state.cleared.slice(0, 5).every((c) => c === true)).toBe(true);
   });
 });

@@ -1,211 +1,378 @@
-// Floor 9 — the final trial. Everything learned is tested at once: first
-// discern the true sphere among decoys (Floor 8's mechanic), then escort it
-// by hand (Floor 3's mechanic) through a corridor that narrows like Floor
-// 5's safe band, past obstacles it must not touch. One composite challenge,
-// not nine floors stitched together.
-import { placeButtons } from "../placement.ts";
-import { pickTrue, isInsideCorridor, collidesWithObstacle, clamp } from "./rules.ts";
+// Floor 9 — Pangu splits heaven and earth. The final trial, and the only one
+// with three continuous stages inside a single floor: break the chaos egg
+// with a timed strike, drag heaven up and earth down while they drift back
+// toward each other, then hold Pangu steady between them until the pillar
+// locks in. No on-screen "Stage 1/2/3" labels — the myth and the visuals
+// carry the structure.
 import {
-  makeSphere,
-  place,
-  raf,
-  onTap,
-  rectOf,
-  createDeceiver,
-  type PointerQuality,
-  type FloorContext,
-  type FloorController,
-} from "./shared.ts";
+  clamp,
+  crackBrightnessAt,
+  chaosStrikeOutcome,
+  stepChaosInstability,
+  isChaosCollapsed,
+  havePanguHalvesCollided,
+  driftHalfTowardCenter,
+  panguHalvesSettled,
+  supportDisturbanceAt,
+  isCoreStable,
+  stepSupportProgress,
+  isSupportComplete,
+  SUPPORT_HOLD_SECONDS,
+  SKY_HOME_Y,
+  type PanguPhase,
+} from "./rules.ts";
+import { makeSphere, place, raf, rectOf, type FloorContext, type FloorController } from "./shared.ts";
+import { showStaticFloorMyth } from "./caption.ts";
 
-const DISCERN_COUNT = 4;
-const QUALITIES: PointerQuality[] = ["delayed", "exaggerated", "mirrored"];
-
-const START_X = 0.1;
-const EXIT_X = 0.9;
-const CORRIDOR_START_HALF = 0.24;
-const CORRIDOR_END_HALF = 0.09;
-const OBSTACLES = [
-  { x: 0.42, y: 0.42, r: 0.055 },
-  { x: 0.63, y: 0.58, r: 0.06 },
-];
-
-interface Figure {
-  id: string;
-  el: HTMLDivElement;
-  x: number;
-  y: number;
-  bobPhase: number;
-  deceiver: ReturnType<typeof createDeceiver>;
-}
-
-function corridorHalfWidthAt(x: number): number {
-  const progress = clamp((x - START_X) / (EXIT_X - START_X), 0, 1);
-  return CORRIDOR_START_HALF + (CORRIDOR_END_HALF - CORRIDOR_START_HALF) * progress;
-}
+const CHARGE_SECONDS = 1.3;
+// The halves drag along the Y axis, but the requested separation is framed
+// against viewport *width* — 50% of it, converted into a normalized Y
+// distance via the viewport's own aspect ratio, so it scales responsively
+// with the window instead of being a fixed fraction of height.
+const HALVES_START_GAP_WIDTH_FRACTION = 0.5;
+const HALVES_START_GAP_MIN = 0.14;
+const SKY_DRAG_MIN_Y = 0.04;
+const EARTH_DRAG_MAX_Y = 0.96;
+// The distance from center to the home band is 0.5 - SKY_HOME_Y. Stop short
+// of it by a real margin, so on ordinary wide viewports (where the raw 50vw
+// conversion would land past the home band) the halves never start already
+// "home" — stage 2 always still requires an actual drag, just a shorter one.
+const HALVES_START_GAP_DRAG_MARGIN = 0.05;
+const HALVES_START_GAP_MAX = 0.5 - SKY_HOME_Y - HALVES_START_GAP_DRAG_MARGIN;
+const COLLISION_LIMIT = 3;
+const COLLAPSE_OFFSET = 0.42;
+const COLLAPSE_LIMIT = 3;
+const SHAKE_DURATION = 0.34;
 
 export function mount(container: HTMLElement, ctx: FloorContext): FloorController {
-  const positions = placeButtons({ count: DISCERN_COUNT, minDistance: 0.26, margin: 0.16, rng: ctx.rng });
-  const trueIndex = Math.floor(ctx.rng() * DISCERN_COUNT);
-  const figures: Figure[] = [];
-  const pointer = { x: -9999, y: -9999, active: false };
-  let phase: "discern" | "escort" | "done" = "discern";
+  const myth = showStaticFloorMyth(container, {
+    title: "Floor IX · Pangu",
+    lines: [
+      "Heaven and Earth were once one, sealed inside chaos.",
+      "Pangu split the void: the light rose, the heavy sank.",
+      "If Heaven and Earth meet again, all returns to chaos.",
+    ],
+  });
+
+  container.classList.add("pangu-stage");
+
+  let phase: PanguPhase = "chaos";
   let stopped = false;
+  // True during the brief pause between stages (crack widening, halves
+  // re-fusing, pillar locking in) — blocks re-entrant detection checks and
+  // stray input so a click or a lingering condition can't double-fire a
+  // transition while the next stage's DOM hasn't been built yet.
+  let transitioning = false;
+  let currentEls: HTMLElement[] = [];
+  const pointer = { x: 0, y: 0 };
 
-  for (let i = 0; i < DISCERN_COUNT; i++) {
-    const isTrue = i === trueIndex;
-    const el = makeSphere(isTrue ? "target" : "decoy");
-    el.classList.add("sphere--figure");
-    container.appendChild(el);
-    const quality: PointerQuality = isTrue ? "authentic" : QUALITIES[i % QUALITIES.length]!;
-    const figure: Figure = {
-      id: `final-${i}`,
-      el,
-      x: positions[i]!.x,
-      y: positions[i]!.y,
-      bobPhase: ctx.rng() * Math.PI * 2,
-      deceiver: createDeceiver(quality),
-    };
-    figures.push(figure);
-    onTap(el, () => handlePick(figure));
-  }
-  const trueId = figures[trueIndex]!.id;
+  const flash = document.createElement("div");
+  flash.className = "pangu-flash";
+  container.appendChild(flash);
 
-  function fail(el: HTMLElement): void {
-    if (phase === "done") return;
-    phase = "done";
-    el.classList.add("sphere--extinguish");
-    window.setTimeout(() => ctx.onFail(), 300);
+  function fireFlash(): void {
+    flash.classList.add("pangu-flash--peak");
+    window.setTimeout(() => flash.classList.remove("pangu-flash--peak"), 60);
   }
 
-  function handlePick(figure: Figure): void {
-    if (phase !== "discern") return;
-    const outcome = pickTrue(figure.id, trueId);
-    for (const f of figures) {
-      if (f.id === figure.id) continue;
-      f.el.classList.add("sphere--extinguish");
-      window.setTimeout(() => f.el.remove(), 260);
-    }
-    if (outcome === "fail") {
-      fail(figure.el);
-      return;
-    }
-    phase = "escort";
-    figure.el.classList.remove("sphere--decoy");
-    figure.el.classList.add("sphere--target", "sphere--ember");
-    beginEscort(figure);
+  function shakeStage(): void {
+    container.classList.add("pangu-stage--shake");
+    window.setTimeout(() => container.classList.remove("pangu-stage--shake"), 420);
   }
 
-  container.addEventListener("pointermove", (ev) => {
+  function clearStageEls(): void {
+    for (const el of currentEls) el.remove();
+    currentEls = [];
+  }
+
+  function onPointerMove(ev: PointerEvent): void {
     const rect = rectOf(container);
     pointer.x = ev.clientX - rect.left;
     pointer.y = ev.clientY - rect.top;
-    pointer.active = true;
-  });
-  container.addEventListener("pointerleave", () => {
-    pointer.active = false;
-  });
+  }
+  container.addEventListener("pointermove", onPointerMove);
 
-  let corridorEls: HTMLDivElement[] = [];
-  let obstacleEls: HTMLDivElement[] = [];
-  let altar: HTMLDivElement | null = null;
+  // ---------- Stage 1: breaking chaos ----------
+  let chaosStartT = 0;
+  let charging = false;
+  let charge = 0;
+  let chaosInstability = 0;
+  let eggEl: HTMLDivElement | null = null;
+  let eggSwirl: HTMLDivElement | null = null;
+  let eggCrack: HTMLDivElement | null = null;
+  let chargeBar: HTMLDivElement | null = null;
+  let chargeFill: HTMLDivElement | null = null;
+  let shakeT = 0;
 
-  function beginEscort(figure: Figure): void {
-    figure.x = START_X;
-    figure.y = 0.5;
+  function enterChaos(atT: number): void {
+    clearStageEls();
+    phase = "chaos";
+    chaosStartT = atT;
+    charging = false;
+    charge = 0;
 
-    const top = document.createElement("div");
-    top.className = "corridor-wall corridor-wall--top";
-    const bottom = document.createElement("div");
-    bottom.className = "corridor-wall corridor-wall--bottom";
-    container.insertBefore(top, figure.el);
-    container.insertBefore(bottom, figure.el);
-    corridorEls = [top, bottom];
+    eggEl = document.createElement("div");
+    eggEl.className = "pangu-egg";
+    eggSwirl = document.createElement("div");
+    eggSwirl.className = "pangu-egg__swirl";
+    eggEl.appendChild(eggSwirl);
+    eggCrack = document.createElement("div");
+    eggCrack.className = "pangu-egg__crack";
+    eggEl.appendChild(eggCrack);
+    container.appendChild(eggEl);
 
-    obstacleEls = OBSTACLES.map((o) => {
-      const el = makeSphere("ghost");
-      el.classList.add("obstacle");
-      el.style.width = `${o.r * 2 * 100}%`;
-      container.insertBefore(el, figure.el);
-      return el;
-    });
+    chargeBar = document.createElement("div");
+    chargeBar.className = "pangu-charge";
+    chargeFill = document.createElement("div");
+    chargeFill.className = "pangu-charge__fill";
+    chargeBar.appendChild(chargeFill);
+    container.appendChild(chargeBar);
 
-    altar = makeSphere("ghost") as HTMLDivElement;
-    altar.classList.add("altar");
-    container.insertBefore(altar, figure.el);
+    currentEls = [eggEl, chargeBar];
+  }
 
-    let dragging = false;
-    figure.el.addEventListener("pointerdown", (ev) => {
+  function onEggPointerDown(ev: PointerEvent): void {
+    if (phase !== "chaos" || transitioning) return;
+    ev.preventDefault();
+    charging = true;
+    charge = 0;
+  }
+
+  function resolveChaosStrike(atT: number): void {
+    charging = false;
+    const brightness = crackBrightnessAt(atT - chaosStartT);
+    const outcome = chaosStrikeOutcome(charge, brightness);
+    chaosInstability = stepChaosInstability(chaosInstability, outcome);
+    if (outcome === "success") {
+      beginSplit();
+      return;
+    }
+    shakeT = SHAKE_DURATION;
+    shakeStage();
+    if (isChaosCollapsed(chaosInstability)) {
+      window.setTimeout(() => ctx.onFail(), 320);
+    }
+  }
+
+  function beginSplit(): void {
+    transitioning = true;
+    phase = "separating";
+    fireFlash();
+    shakeStage();
+    clearStageEls();
+    // A beat of silence before the halves appear, so the strike lands with
+    // weight instead of the floor instantly reorganising itself.
+    window.setTimeout(() => {
+      if (stopped) return;
+      enterSeparating();
+      transitioning = false;
+    }, 460);
+  }
+
+  // ---------- Stage 2: dividing heaven and earth ----------
+  let skyY = 0.5;
+  let earthY = 0.5;
+  let draggingSky = false;
+  let draggingEarth = false;
+  let collisionCount = 0;
+  let skyEl: HTMLDivElement | null = null;
+  let earthEl: HTMLDivElement | null = null;
+
+  function enterSeparating(): void {
+    clearStageEls();
+    const rect = rectOf(container);
+    const rawHalfGap = rect.height > 0 ? (HALVES_START_GAP_WIDTH_FRACTION * rect.width) / (2 * rect.height) : HALVES_START_GAP_MIN;
+    const halfGap = clamp(rawHalfGap, HALVES_START_GAP_MIN, HALVES_START_GAP_MAX);
+    skyY = 0.5 - halfGap;
+    earthY = 0.5 + halfGap;
+    draggingSky = false;
+    draggingEarth = false;
+
+    skyEl = document.createElement("div");
+    skyEl.className = "pangu-half pangu-half--sky";
+    container.appendChild(skyEl);
+    earthEl = document.createElement("div");
+    earthEl.className = "pangu-half pangu-half--earth";
+    container.appendChild(earthEl);
+    currentEls = [skyEl, earthEl];
+
+    skyEl.addEventListener("pointerdown", (ev) => {
+      if (phase !== "separating" || transitioning) return;
       ev.preventDefault();
-      dragging = true;
-      figure.el.setPointerCapture(ev.pointerId);
+      draggingSky = true;
+      skyEl!.setPointerCapture(ev.pointerId);
     });
-    figure.el.addEventListener("pointermove", (ev) => {
-      if (!dragging) return;
-      const rect = rectOf(container);
-      figure.x = clamp((ev.clientX - rect.left) / rect.width, 0.04, 0.96);
-      figure.y = clamp((ev.clientY - rect.top) / rect.height, 0.06, 0.94);
+    skyEl.addEventListener("pointerup", () => {
+      draggingSky = false;
     });
-    figure.el.addEventListener("pointerup", () => {
-      dragging = false;
+    earthEl.addEventListener("pointerdown", (ev) => {
+      if (phase !== "separating" || transitioning) return;
+      ev.preventDefault();
+      draggingEarth = true;
+      earthEl!.setPointerCapture(ev.pointerId);
+    });
+    earthEl.addEventListener("pointerup", () => {
+      draggingEarth = false;
     });
   }
 
-  const stop = raf((_dt, t) => {
+  function collideHalves(): void {
+    transitioning = true;
+    collisionCount++;
+    fireFlash();
+    shakeStage();
+    clearStageEls();
+    if (collisionCount >= COLLISION_LIMIT) {
+      window.setTimeout(() => ctx.onFail(), 340);
+      return;
+    }
+    window.setTimeout(() => {
+      if (stopped) return;
+      enterChaos(rafT);
+      transitioning = false;
+    }, 260);
+  }
+
+  // ---------- Stage 3: supporting heaven and earth ----------
+  let coreX = 0.5;
+  let supportProgress = 0;
+  let held = false;
+  let collapseCount = 0;
+  let pillarEl: HTMLDivElement | null = null;
+  let coreEl: HTMLDivElement | null = null;
+
+  function beginSupport(): void {
+    transitioning = true;
+    fireFlash();
+    clearStageEls();
+    window.setTimeout(() => {
+      if (stopped) return;
+      enterSupporting();
+      transitioning = false;
+    }, 240);
+  }
+
+  function enterSupporting(): void {
+    clearStageEls();
+    phase = "supporting";
+    coreX = 0.5;
+    supportProgress = 0;
+    held = false;
+
+    pillarEl = document.createElement("div");
+    pillarEl.className = "pangu-pillar";
+    container.appendChild(pillarEl);
+
+    coreEl = makeSphere("target");
+    coreEl.classList.add("sphere--pangu-core");
+    container.appendChild(coreEl);
+    currentEls = [pillarEl, coreEl];
+
+    coreEl.addEventListener("pointerdown", (ev) => {
+      if (phase !== "supporting" || transitioning) return;
+      ev.preventDefault();
+      held = true;
+      coreEl!.setPointerCapture(ev.pointerId);
+    });
+  }
+
+  function collapseSupport(): void {
+    supportProgress = 0;
+    collapseCount++;
+    fireFlash();
+    shakeStage();
+    if (collapseCount >= COLLAPSE_LIMIT) {
+      window.setTimeout(() => ctx.onFail(), 340);
+    }
+  }
+
+  function onPointerUp(): void {
+    if (phase === "chaos" && charging) {
+      resolveChaosStrike(rafT);
+    }
+    if (phase === "supporting") {
+      held = false;
+    }
+    draggingSky = false;
+    draggingEarth = false;
+  }
+
+  container.addEventListener("pointerdown", onEggPointerDown);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+
+  let rafT = 0;
+  enterChaos(0);
+
+  const stop = raf((dt, t) => {
+    rafT = t;
+    if (stopped) return;
     const rect = rectOf(container);
 
-    if (phase === "discern") {
-      const size = Math.min(rect.width, rect.height) * 0.13;
-      for (const figure of figures) {
-        const bobX = figure.x + 0.01 * Math.sin(t * 0.5 + figure.bobPhase);
-        const bobY = figure.y + 0.012 * Math.cos(t * 0.42 + figure.bobPhase);
-        const cx = bobX * rect.width;
-        const cy = bobY * rect.height;
-        const { tiltX, tiltY, magX, magY } = figure.deceiver.update(cx, cy, size, pointer);
-        place(
-          figure.el,
-          bobX,
-          bobY,
-          rect,
-          `translate(${magX}px, ${magY}px) rotateX(${tiltX}deg) rotateY(${tiltY}deg)`,
-        );
+    if (phase === "chaos") {
+      if (charging) charge = Math.min(1, charge + dt / CHARGE_SECONDS);
+      if (shakeT > 0) shakeT = Math.max(0, shakeT - dt);
+      const shakeAmt = shakeT > 0 ? 6 * (shakeT / SHAKE_DURATION) : 0;
+      const shakeX = shakeAmt * Math.sin(shakeT * 60);
+      const shakeY = shakeAmt * Math.cos(shakeT * 47);
+      const breathe = 1 + 0.035 * Math.sin(t * 1.4);
+      if (eggEl) place(eggEl, 0.5, 0.5, rect, `scale(${breathe}) translate(${shakeX}px, ${shakeY}px)`);
+      if (eggCrack) {
+        const brightness = crackBrightnessAt(t - chaosStartT);
+        eggCrack.style.opacity = String(0.15 + brightness * 0.85);
       }
+      if (chargeFill) chargeFill.style.width = `${(charging ? charge : 0) * 100}%`;
+      if (chargeBar) chargeBar.classList.toggle("pangu-charge--armed", charging);
       return;
     }
 
-    if (phase !== "escort") return;
-    const figure = figures[trueIndex]!;
-    const centerY = 0.5;
-    const halfWidth = corridorHalfWidthAt(figure.x);
-    const [top, bottom] = corridorEls;
-    if (top && bottom) {
-      top.style.height = `${(centerY - halfWidth) * 100}%`;
-      bottom.style.top = `${(centerY + halfWidth) * 100}%`;
-      bottom.style.height = `${(1 - (centerY + halfWidth)) * 100}%`;
-    }
-    for (let i = 0; i < OBSTACLES.length; i++) {
-      const o = OBSTACLES[i]!;
-      place(obstacleEls[i]!, o.x, o.y, rect);
-    }
-    if (altar) place(altar, EXIT_X, centerY, rect);
-    place(figure.el, figure.x, figure.y, rect);
+    if (phase === "separating") {
+      if (transitioning || !skyEl || !earthEl) return;
+      const pointerYNorm = pointer.y / rect.height;
+      skyY = draggingSky ? clamp(pointerYNorm, SKY_DRAG_MIN_Y, 0.5) : driftHalfTowardCenter(skyY, true, dt);
+      earthY = draggingEarth ? clamp(pointerYNorm, 0.5, EARTH_DRAG_MAX_Y) : driftHalfTowardCenter(earthY, false, dt);
+      place(skyEl, 0.5, skyY, rect);
+      place(earthEl, 0.5, earthY, rect);
 
-    const safe = isInsideCorridor(figure.y, centerY, halfWidth);
-    figure.el.classList.toggle("sphere--danger", !safe);
-    if (!safe) {
-      fail(figure.el);
-      return;
-    }
-    for (const o of OBSTACLES) {
-      if (collidesWithObstacle(figure.x, figure.y, o.x, o.y, o.r)) {
-        fail(figure.el);
+      if (havePanguHalvesCollided(skyY, earthY)) {
+        collideHalves();
         return;
       }
+      if (panguHalvesSettled(skyY, earthY)) {
+        beginSupport();
+      }
+      return;
     }
 
-    if (figure.x >= EXIT_X) {
-      phase = "done";
-      figure.el.classList.add("sphere--pressed");
-      window.setTimeout(() => ctx.onClear(), 280);
+    if (phase === "supporting") {
+      if (!pillarEl || !coreEl) return;
+      if (held) {
+        const pointerXNorm = clamp(pointer.x / rect.width, 0, 1);
+        coreX += (pointerXNorm - coreX) * Math.min(1, dt * 8);
+      }
+      coreX += supportDisturbanceAt(t) * dt * 0.12;
+      coreX = clamp(coreX, 0.08, 0.92);
+      const offset = coreX - 0.5;
+      const stable = isCoreStable(offset);
+      supportProgress = stepSupportProgress(supportProgress, stable && held, dt);
+
+      const progressFrac = supportProgress / SUPPORT_HOLD_SECONDS;
+      const skyTargetY = 0.5 - 0.34 * progressFrac;
+      const earthTargetY = 0.5 + 0.34 * progressFrac;
+      pillarEl.style.setProperty("--pangu-pillar-top", `${skyTargetY * 100}%`);
+      pillarEl.style.setProperty("--pangu-pillar-bottom", `${(1 - earthTargetY) * 100}%`);
+      pillarEl.style.setProperty("--pangu-pillar-bend", `${offset * 120}px`);
+      pillarEl.style.setProperty("--pangu-pillar-glow", String(0.25 + progressFrac * 0.75));
+      place(coreEl, coreX, 0.5, rect);
+      coreEl.classList.toggle("sphere--pressed", held && stable);
+
+      if (Math.abs(offset) > COLLAPSE_OFFSET) {
+        collapseSupport();
+      }
+      if (isSupportComplete(supportProgress)) {
+        phase = "complete";
+        window.setTimeout(() => ctx.onClear(), 460);
+      }
     }
   });
 
@@ -214,10 +381,14 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
       if (stopped) return;
       stopped = true;
       stop();
-      for (const f of figures) f.el.remove();
-      for (const el of corridorEls) el.remove();
-      for (const el of obstacleEls) el.remove();
-      altar?.remove();
+      myth.destroy();
+      container.removeEventListener("pointermove", onPointerMove);
+      container.removeEventListener("pointerdown", onEggPointerDown);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      clearStageEls();
+      flash.remove();
+      container.classList.remove("pangu-stage", "pangu-stage--shake");
     },
   };
 }

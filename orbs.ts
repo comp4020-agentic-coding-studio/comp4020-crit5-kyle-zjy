@@ -31,7 +31,19 @@ export function createOrbRail(container: HTMLElement) {
         orbs[i]!.classList.remove("orb--ash", "orb--relight");
       }
     },
+    /** Anchor-mode rewind: no full relight, just a brief flicker on the
+     *  floor the player is anchored to, so it still reads as "time reset"
+     *  without touching the other orbs' progress. */
+    pulseCurrent(index: number): void {
+      const orb = orbs[index];
+      if (!orb) return;
+      orb.classList.add("orb--relight");
+      window.setTimeout(() => orb.classList.remove("orb--relight"), 260);
+    },
     async dissolve(): Promise<void> {
+      for (const orb of orbs) orb.classList.add("orb--relight");
+      await new Promise((resolve) => window.setTimeout(resolve, 260));
+      for (const orb of orbs) orb.classList.remove("orb--relight");
       container.classList.add("orb-rail--fade");
       await new Promise((resolve) => window.setTimeout(resolve, 900));
     },

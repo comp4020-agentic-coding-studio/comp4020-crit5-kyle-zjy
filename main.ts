@@ -8,11 +8,14 @@ import {
   failFloor,
   beginRewind,
   finishRewind,
+  setAnchorEnabled,
   FLOOR_COUNT,
   type TowerState,
+  type RewindMode,
 } from "./tower.ts";
 import { createOrbRail } from "./orbs.ts";
-import { playAwakening, playRewindFlash } from "./intro.ts";
+import { createAnchorToggle, loadAnchorPreference } from "./anchor.ts";
+import { playAwakening, playRewindFlash, playAnchorRewindFlash } from "./intro.ts";
 import { playEnding } from "./ending.ts";
 import { playAwaken, playFloorClear, playRewind, playEndingChord, primeAudio } from "./audio.ts";
 import type { FloorContext, FloorController } from "./floors/shared.ts";
@@ -33,8 +36,9 @@ const stageEl = document.querySelector<HTMLElement>("#floor-stage");
 const orbRailEl = document.querySelector<HTMLElement>("#orb-rail");
 const introOverlay = document.querySelector<HTMLElement>("#intro-overlay");
 const endingOverlay = document.querySelector<HTMLElement>("#ending-overlay");
+const anchorMountEl = document.querySelector<HTMLElement>("#anchor-toggle-mount");
 
-if (!stageEl || !orbRailEl || !introOverlay || !endingOverlay) {
+if (!stageEl || !orbRailEl || !introOverlay || !endingOverlay || !anchorMountEl) {
   throw new Error("expected tower markup is missing from index.html");
 }
 
@@ -50,8 +54,12 @@ const SEEN_KEY = "ninefold-tower:seen";
 const firstRun = sessionStorage.getItem(SEEN_KEY) === null;
 sessionStorage.setItem(SEEN_KEY, "1");
 
-let state: TowerState = createTower(firstRun);
+let state: TowerState = createTower(firstRun, loadAnchorPreference());
 let controller: FloorController | null = null;
+
+createAnchorToggle(anchorMountEl, state.anchorEnabled, (enabled) => {
+  state = setAnchorEnabled(state, enabled);
+});
 
 void run();
 
@@ -97,22 +105,29 @@ function handleClear(): void {
 function handleFail(): void {
   playRewind();
   state = failFloor(state);
+  const mode: RewindMode = state.rewindMode ?? "full";
+  const anchoredFloor = state.floor;
   state = beginRewind(state);
-  void rewindAndRestart();
+  void rewindAndRestart(mode, anchoredFloor);
 }
 
-async function rewindAndRestart(): Promise<void> {
+async function rewindAndRestart(mode: RewindMode, anchoredFloor: number): Promise<void> {
   controller?.destroy();
   controller = null;
-  await playRewindFlash(introOverlay!);
-  await orbRail.playRewind();
+  if (mode === "anchor") {
+    await playAnchorRewindFlash(introOverlay!);
+    orbRail.pulseCurrent(anchoredFloor);
+  } else {
+    await playRewindFlash(introOverlay!);
+    await orbRail.playRewind();
+  }
   state = finishRewind(state);
   orbRail.setCleared(state.cleared);
   mountFloor();
 }
 
 function handleReplay(): void {
-  state = createTower(false);
+  state = createTower(false, state.anchorEnabled);
   orbRailEl!.classList.remove("orb-rail--fade");
   orbRail.setCleared(state.cleared);
   mountFloor();

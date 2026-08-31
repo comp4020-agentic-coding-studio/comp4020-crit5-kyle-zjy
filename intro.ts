@@ -2,7 +2,7 @@
 // every later death. Both build their own DOM inside the overlay container
 // they're given and clean up after themselves, so main.ts only has to call
 // one function and await the promise.
-const WAKE_LINES = ["你醒了……", "你被困在了这九层宝塔之中", "逃出这里", "或者", "死"];
+const WAKE_LINES = ["You are awake…", "You are trapped inside this ninefold tower", "Escape it", "Or", "die"];
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -60,7 +60,7 @@ export async function playRewindFlash(overlay: HTMLElement): Promise<void> {
   await wait(30);
   flash.classList.add("rewind-flash--peak");
   const whisper = document.createElement("p");
-  whisper.textContent = "你又回来了";
+  whisper.textContent = "You are back again";
   lines.appendChild(whisper);
   await wait(40);
   whisper.classList.add("is-visible");
@@ -68,6 +68,27 @@ export async function playRewindFlash(overlay: HTMLElement): Promise<void> {
   flash.classList.add("rewind-flash--collapse");
   whisper.classList.remove("is-visible");
   await wait(520);
+
+  overlay.classList.remove("is-visible");
+  overlay.innerHTML = "";
+}
+
+/** The Rewind Anchor's shorter cousin: death still reverses time, but only
+ *  as far back as the current floor — no whisper, no black collapse to a
+ *  point, just a quick white flash and straight back into play. */
+export async function playAnchorRewindFlash(overlay: HTMLElement): Promise<void> {
+  overlay.classList.add("is-visible");
+  overlay.innerHTML = "";
+
+  const flash = document.createElement("div");
+  flash.className = "rewind-flash";
+  overlay.appendChild(flash);
+
+  await wait(20);
+  flash.classList.add("rewind-flash--peak");
+  await wait(160);
+  flash.classList.remove("rewind-flash--peak");
+  await wait(280);
 
   overlay.classList.remove("is-visible");
   overlay.innerHTML = "";

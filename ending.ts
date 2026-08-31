@@ -15,19 +15,26 @@ export async function playEnding(overlay: HTMLElement, onReplay: () => void): Pr
 
   const title = document.createElement("p");
   title.className = "ending-title";
-  title.textContent = "你逃了出来";
+  title.textContent = "You have escaped";
   overlay.appendChild(title);
+
+  const epilogue = document.createElement("p");
+  epilogue.className = "ending-epilogue";
+  epilogue.textContent = "The chaos has opened. The cycle has ended.";
+  overlay.appendChild(epilogue);
 
   const hint = document.createElement("p");
   hint.className = "ending-hint";
-  hint.textContent = "再做一次这个梦";
+  hint.textContent = "Dream it again";
   overlay.appendChild(hint);
 
   await wait(50);
   whiteout.classList.add("is-visible");
   await wait(1200);
   title.classList.add("is-visible");
-  await wait(2600);
+  await wait(1800);
+  epilogue.classList.add("is-visible");
+  await wait(1600);
   hint.classList.add("is-visible");
 
   hint.addEventListener(

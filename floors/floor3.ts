@@ -1,22 +1,32 @@
-// Floor 3 — Prometheus carries fire. A fragile ember must be dragged from
-// its cradle to the altar; a band of wind across the middle drains it while
-// it lingers there, and recovers it once clear. The whole floor is about
-// careful, continuous movement rather than a single decisive input.
-import { stepFlame } from "./rules.ts";
+// Floor 3 — Prometheus carries fire. Three walls of wind stand between the
+// cradle and the altar, each cycling windy and calm on its own clock. The
+// ember can sit anywhere safely, but crossing a wall while it's windy snuffs
+// it out at once — the floor is about timing a crossing, not steering.
+import { WIND_WALLS, isWindWallActive } from "./rules.ts";
 import { makeSphere, place, raf, rectOf, clamp, type FloorContext, type FloorController } from "./shared.ts";
+import { showFloorMyth } from "./caption.ts";
 
-const HAZARD_X0 = 0.38;
-const HAZARD_X1 = 0.62;
 const ALTAR_X = 0.86;
 const ALTAR_Y = 0.5;
 const ARRIVE_RADIUS = 0.07;
+const START_X = 0.12;
+const NEAR_RANGE = 0.12;
 
 export function mount(container: HTMLElement, ctx: FloorContext): FloorController {
-  const hazard = document.createElement("div");
-  hazard.className = "hazard hazard--wind";
-  hazard.style.left = `${HAZARD_X0 * 100}%`;
-  hazard.style.width = `${(HAZARD_X1 - HAZARD_X0) * 100}%`;
-  container.appendChild(hazard);
+  const myth = showFloorMyth(container, {
+    title: "Prometheus Steals the Fire",
+    text: "He stole the flame from the gods, and carried it through the raging wind.",
+  });
+
+  const wallEls = WIND_WALLS.map((wall) => {
+    const el = document.createElement("div");
+    el.className = "wind-wall";
+    el.style.left = `${wall.x0 * 100}%`;
+    el.style.width = `${(wall.x1 - wall.x0) * 100}%`;
+    container.appendChild(el);
+    return el;
+  });
+  const wasActive = WIND_WALLS.map(() => false);
 
   const altar = makeSphere("ghost");
   altar.classList.add("altar");
@@ -26,9 +36,8 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
   ember.classList.add("sphere--ember");
   container.appendChild(ember);
 
-  let x = 0.12;
+  let x = START_X;
   let y = 0.5;
-  let strength = 1;
   let dragging = false;
   let resolved = false;
 
@@ -50,24 +59,33 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
     dragging = false;
   });
 
-  const stop = raf((dt) => {
+  const stop = raf((_dt, t) => {
     if (resolved) return;
     const rect = rectOf(container);
-    const inHazard = x >= HAZARD_X0 && x <= HAZARD_X1;
-    strength = stepFlame(strength, inHazard, dt);
+
+    let tilt = 0;
+    for (let i = 0; i < WIND_WALLS.length; i++) {
+      const wall = WIND_WALLS[i]!;
+      const active = isWindWallActive(wall, t);
+      wallEls[i]!.classList.toggle("wind-wall--active", active);
+      if (active && !wasActive[i]) ctx.onCue?.("wind-rises");
+      wasActive[i] = active;
+
+      const within = x >= wall.x0 && x <= wall.x1;
+      if (active && within) {
+        resolved = true;
+        ember.classList.add("sphere--extinguish");
+        window.setTimeout(() => ctx.onFail(), 260);
+        return;
+      }
+      if (active) {
+        const dist = Math.abs(x - (wall.x0 + wall.x1) / 2);
+        if (dist < NEAR_RANGE) tilt += 7 * (1 - dist / NEAR_RANGE);
+      }
+    }
 
     place(altar, ALTAR_X, ALTAR_Y, rect);
-    place(ember, x, y, rect);
-    const scale = 0.55 + strength * 0.55;
-    ember.style.setProperty("--breath", String(scale));
-    ember.style.opacity = String(0.35 + strength * 0.65);
-
-    if (strength <= 0) {
-      resolved = true;
-      ember.classList.add("sphere--extinguish");
-      window.setTimeout(() => ctx.onFail(), 320);
-      return;
-    }
+    place(ember, x, y, rect, `rotate(${clamp(tilt, -12, 12)}deg)`);
 
     const distToAltar = Math.hypot(x - ALTAR_X, y - ALTAR_Y);
     if (distToAltar <= ARRIVE_RADIUS) {
@@ -80,7 +98,8 @@ export function mount(container: HTMLElement, ctx: FloorContext): FloorControlle
   return {
     destroy(): void {
       stop();
-      hazard.remove();
+      myth.destroy();
+      for (const el of wallEls) el.remove();
       altar.remove();
       ember.remove();
     },
