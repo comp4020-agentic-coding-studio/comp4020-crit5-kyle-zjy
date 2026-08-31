@@ -1,7 +1,8 @@
 // Lightweight Web Audio synthesis — no audio files. The context is created
 // lazily on the first user gesture so autoplay policies are respected, and
 // every call is defensive: a browser that refuses audio should never break
-// the game.
+// the game. Four narrative cues only, one per moment that matters: waking,
+// clearing a floor, the time-reversal, and the final release.
 let ctx: AudioContext | null = null;
 
 function context(): AudioContext | null {
@@ -27,16 +28,26 @@ function tone(
     gain = 0.2,
     delay = 0,
     detune = 0,
-  }: { freq: number; duration: number; type?: OscillatorType; gain?: number; delay?: number; detune?: number },
+    freqEnd,
+  }: {
+    freq: number;
+    duration: number;
+    type?: OscillatorType;
+    gain?: number;
+    delay?: number;
+    detune?: number;
+    freqEnd?: number;
+  },
 ): void {
   const osc = c.createOscillator();
   const amp = c.createGain();
   osc.type = type;
-  osc.frequency.value = freq;
-  osc.detune.value = detune;
   const start = c.currentTime + delay;
+  osc.frequency.setValueAtTime(freq, start);
+  if (freqEnd !== undefined) osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), start + duration);
+  osc.detune.value = detune;
   amp.gain.setValueAtTime(0, start);
-  amp.gain.linearRampToValueAtTime(gain, start + 0.008);
+  amp.gain.linearRampToValueAtTime(gain, start + 0.02);
   amp.gain.exponentialRampToValueAtTime(0.0001, start + duration);
   osc.connect(amp).connect(c.destination);
   osc.start(start);
@@ -58,37 +69,37 @@ function noiseBurst(c: AudioContext, { duration, gain = 0.2, delay = 0 }: { dura
   src.start(start);
 }
 
-/** A satisfying, tactile mechanical click plus a soft tonal resonance. */
-export function playCorrect(): void {
+/** A soft, low swell as the eyes open. */
+export function playAwaken(): void {
   const c = context();
   if (!c) return;
-  noiseBurst(c, { duration: 0.05, gain: 0.15 });
-  tone(c, { freq: 440, duration: 0.12, type: "triangle", gain: 0.18, delay: 0.01 });
-  tone(c, { freq: 660, duration: 0.18, type: "sine", gain: 0.1, delay: 0.02 });
+  tone(c, { freq: 90, freqEnd: 220, duration: 2.2, type: "sine", gain: 0.1 });
+  tone(c, { freq: 180, freqEnd: 330, duration: 2.4, type: "sine", gain: 0.05, delay: 0.3 });
 }
 
-/** A dry, dissonant buzz for a wrong press. */
-export function playWrong(): void {
+/** A short ceremonial tone when a floor is cleared; pitch rises gently with
+ *  the floor index so ascending the tower has an audible shape. */
+export function playFloorClear(floorIndex: number): void {
   const c = context();
   if (!c) return;
-  tone(c, { freq: 140, duration: 0.14, type: "sawtooth", gain: 0.16 });
-  tone(c, { freq: 152, duration: 0.14, type: "sawtooth", gain: 0.12, detune: 8 });
+  const base = 392 * 2 ** (floorIndex / 24);
+  tone(c, { freq: base, duration: 0.5, type: "sine", gain: 0.16 });
+  tone(c, { freq: base * 1.5, duration: 0.7, type: "sine", gain: 0.08, delay: 0.05 });
 }
 
-/** A short resolving chord for the win. */
-export function playWin(): void {
+/** A collapsing, reversing swell for death and the rewind that follows it. */
+export function playRewind(): void {
   const c = context();
   if (!c) return;
-  [523.25, 659.25, 783.99].forEach((freq, i) =>
-    tone(c, { freq, duration: 0.7, type: "sine", gain: 0.14, delay: i * 0.05 }),
+  tone(c, { freq: 260, freqEnd: 70, duration: 0.9, type: "sawtooth", gain: 0.14 });
+  noiseBurst(c, { duration: 0.35, gain: 0.1, delay: 0.05 });
+}
+
+/** A clean, resolving chord for the ending — release, then silence. */
+export function playEndingChord(): void {
+  const c = context();
+  if (!c) return;
+  [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) =>
+    tone(c, { freq, duration: 1.6, type: "sine", gain: 0.1, delay: i * 0.08 }),
   );
-}
-
-/** A low, distorted collapse for the loss. */
-export function playLose(): void {
-  const c = context();
-  if (!c) return;
-  tone(c, { freq: 110, duration: 0.9, type: "sawtooth", gain: 0.16 });
-  tone(c, { freq: 96, duration: 0.9, type: "sawtooth", gain: 0.12, delay: 0.05 });
-  noiseBurst(c, { duration: 0.5, gain: 0.12, delay: 0.05 });
 }

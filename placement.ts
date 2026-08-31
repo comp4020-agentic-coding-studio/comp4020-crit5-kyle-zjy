@@ -2,7 +2,7 @@
 // No infinite retry loops: a bounded number of random attempts per point,
 // falling back to a deterministic grid slot when the arena is too crowded to
 // satisfy the minimum distance randomly.
-import type { Rng } from "./game.ts";
+export type Rng = () => number;
 
 export interface Point {
   x: number;

@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>One Button Too Many</title>
+    <title>Ninefold Tower</title>
     <meta
       name="description"
-      content="A short perception game: press the one real button, again and again, as the page makes that harder to tell."
+      content="Trapped in a nine-floor pagoda of myth-inspired trials. Fail and time rewinds you to the first floor — clear all nine, or die trying, forever, until you don't."
     />
 
     <!--
@@ -23,17 +23,16 @@
   <body>
     <header>
       <nav aria-label="Primary">
-        <a href="./">One Button Too Many</a>
+        <a href="./">Ninefold Tower</a>
       </nav>
     </header>
     <main>
-      <h1 class="visually-hidden">One Button Too Many</h1>
-      <div id="stage" class="stage">
-        <div id="end-screen" class="end-screen" aria-live="polite">
-          <h2 id="end-title"></h2>
-          <p id="end-stats"></p>
-          <p class="hint">press anywhere to try again</p>
-        </div>
+      <h1 class="visually-hidden">Ninefold Tower</h1>
+      <div id="tower" class="tower">
+        <div id="floor-stage" class="floor-stage"></div>
+        <div id="orb-rail" class="orb-rail" aria-hidden="true"></div>
+        <div id="intro-overlay" class="overlay overlay--intro" aria-hidden="true"></div>
+        <div id="ending-overlay" class="overlay overlay--ending" aria-hidden="true"></div>
       </div>
     </main>
     <script type="module" src="./main.ts"></script>

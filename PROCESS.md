@@ -13,65 +13,79 @@ cover every deliverable.
 
 ## What I built
 
-**ONE BUTTON TOO MANY** is a short perception game: one button on the page is
-real and always responds the same way; everything else is a decoy that
-multiplies and gets better at pretending. There is no instruction screen
-anywhere --- the only way to learn which button is real is to press one and
-watch what happens. The game teaches its own rules through nine stages of
-increasingly convincing deception (duplication, false similarity, shuffling,
-pointer mimicry, crowding), ends in one of two short, distinct sequences
-("ONE WAS ENOUGH." or "TOO MANY."), and never uses colour alone, an
-instructions modal, or a labelled/starred button to reveal the answer.
+**NINEFOLD TOWER** replaces this repo's original one-real-button mechanic with
+a nine-floor pagoda of myth-inspired trials. The player wakes up trapped
+inside it; each floor is a short, mechanically distinct challenge told through
+its rules rather than its text (Hou Yi sparing the last sun, Sisyphus's stone
+rolling back under gravity, Orpheus failing the moment you drag backward,
+Theseus's maze going dark after a brief preview, and so on). Dying doesn't end
+the run --- it rewinds time back to Floor 1 with every floor's progress reset,
+and the loop repeats until the player clears all nine floors and the screen
+resolves to white. Visually the whole tower stays black, white and grey; the
+only gold in the game is the nine-orb progress rail on the right edge, which
+never shows a number or a label, only which floors are still alight.
+
+## Why this direction
+
+The previous build (**ONE BUTTON TOO MANY**) was one mechanic repeated across
+nine stages of escalating deception. That was a good fit for its own brief,
+but asked to build something with real narrative shape, repeating the same
+click-the-real-one loop nine times would have been the wrong move even with
+new art on top --- escalation needs the *mechanic* to change, not just its
+disguise. Nine floors, each teaching one myth through a different verb (aim,
+escort, push, balance, resist, remember, discern), is what makes "everything I
+learned is being tested now" on Floor 9 actually true rather than a slogan.
+
+The intro-once / death-rewind loop is the emotional spine the brief asked for:
+a full wake-up sequence only means something the first time, so it's gated
+behind `sessionStorage` and every later death gets a brief flash-and-whisper
+instead --- the player should feel time folding back, not sit through the same
+five lines again. The nine gold-to-ash orbs are the only progress readout by
+design; a "3/9" counter would have turned a ritual into a checklist.
+
+Architecturally, the single old `game.ts` state machine is retired in favour
+of a small pure saga (`tower.ts`) for the intro/floor/dying/rewinding/ending
+loop, a pure rule module per floor (`floors/rules.ts`) with no DOM or timers,
+and one presentation module per floor (`floors/floor1.ts`...`floor9.ts`) that
+calls into those rules and owns its own `requestAnimationFrame` loop. That
+split is what kept nine wildly different mechanics from turning into one
+tangled file: `spec/tower.test.ts` and `spec/floor-rules.test.ts` test the
+rules directly, with no DOM in sight, the same way the old `spec/game.test.ts`
+tested the single mechanic.
+
+What the automated tests actually verify: floor progression and the
+floor-9-reaches-ending transition, that death resets floor and orb state while
+clearing the first-run flag so the intro never replays, Floor 2's rule that
+shooting the last sun always fails, and the numeric mechanics behind Floors
+3--7 and 9 (flame drain/recovery, the stone's gravity-vs-push physics, the
+drifting safe band, the look-back tolerance, maze wall collision, corridor
+containment and obstacle collision). What they cannot verify, and what still
+needs a person: whether the drag-based floors (Prometheus, Sisyphus, Orpheus,
+the Floor 9 escort) *feel* right rather than merely work, whether the intro's
+pacing lands as cinematic rather than slow, whether the audio cues are
+audible without being intrusive, and whether nine floors together read as
+escalating rather than just "different." None of that is claimed here as
+already checked --- it's flagged as outstanding.
 
 ## The moments that mattered
 
-1. **Decoy IDs would have broken the "shuffle" stage.**
-   The first draft of the state machine (`game.ts`) gave decoys a per-stage id
-   (`decoy-${stage}-${i}`), which is the obvious way to model "a new stage has
-   a new set of buttons." But the brief's shuffle stage needs a decoy that
-   survives a stage transition to be smoothly repositioned, not torn down and
-   recreated --- a fresh id per stage would make every stage transition look
-   like a hard cut. I checked that `STAGE_BUTTON_COUNT` never decreases, which
-   guarantees no slot is ever orphaned, and switched to slot-stable ids
-   (`decoy-${i}`) so the renderer's diff-by-id logic in `render.ts` can animate
-   continuity instead of despawning and respawning.
-   [`81c0ec1`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/81c0ec1)
-
-2. **A CSS class almost leaked which button was real.**
-   While writing `applyBehaviourClasses` in `render.ts`, I added
-   `classList.toggle("obtn--target", m.entity.isTarget)` out of habit ---
-   useful for debugging, and harmless as long as nothing styled it. But the
-   brief is explicit that nothing may give the answer away, and an unstyled
-   hook today is one CSS rule away from a giveaway tomorrow, and a `grep` away
-   from a marker or a curious player finding it in dev tools. I removed the
-   toggle entirely rather than leaving it "safe for now," and left a comment
-   explaining why `entity.isTarget` must never drive a class.
-   [`52053ab`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/52053ab)
-
-3. **Browser verification was blocked, so I fixed the sandbox instead of skipping the check.**
-   Playwright's headless Chromium failed to launch
-   (`libnspr4.so: cannot open shared object file`), and `apt-get install`
-   needed interactive sudo that wasn't available. Rather than reporting "typecheck
-   and unit tests pass" as if that were equivalent to seeing the game run, I
-   downloaded the four missing `.deb` packages with `apt-get download` (no root
-   required), extracted them with `dpkg-deb -x` into a scratch directory, and
-   pointed `LD_LIBRARY_PATH` at the extracted libraries. That got a real headless
-   browser working against the dev server: screenshots through all nine stages,
-   a forced loss (3 wrong presses), and a forced win (all stages cleared), with
-   zero console/page errors.
-   [`42cd499`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/42cd499)
-
-4. **The win screen's own screenshot caught a real bug.**
-   The forced-win screenshot showed the settled target button sitting fully
-   opaque, dead centre, directly behind the "0 mistakes · 4.6s" stats line ---
-   legible, but visually competing with the text it was supposed to sit behind.
-   I hadn't noticed this from reading the animation code; it only showed up once
-   I looked at the rendered frame. Fixed by fading the settled button's opacity
-   to 0.28 in the same transition that scales it down
-   (`render.ts`'s `playWinEnding`), so it reads as a dim, settled artifact
-   instead of competing with the end-screen text. Re-ran the same screenshot
-   script to confirm the fix before committing.
-   [`42cd499`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/42cd499)
+This section is not yet re-filled for the Ninefold Tower rewrite. The redesign
+above hasn't been committed yet (the work explicitly stopped short of
+committing or pushing pending review), and `pnpm check:evidence` requires
+every citation here to resolve to a real commit in this repo --- so citing the
+*previous* mechanic's commits under a section that now describes a different
+game would misrepresent what those commits actually did. Once the redesign is
+committed, replace this section with 2--4 real moments drawn from that
+history. Strong candidates already visible in the diff: the Floor 2 ("Hou Yi")
+redesign from an auto-clearing rule that made the "don't shoot the last sun"
+failure mechanically unreachable, into a grace-window that keeps the last sun
+alive and clickable so restraint is an active, failable choice; the Floor 4
+listener-removal bug where `destroy()` tried to remove event listeners with
+freshly-created closures instead of the ones actually attached, a real leak
+fixed by naming the handlers; and the Floor 9 bug where the escorted sphere
+never reset to the corridor's start position after the discern phase, so the
+"escort from the beginning" challenge could silently start from wherever the
+sphere happened to be placed.
 
 ## Before you ship
 

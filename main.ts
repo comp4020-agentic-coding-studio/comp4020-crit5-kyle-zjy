@@ -1,89 +1,119 @@
-// Wiring only: owns the one mutable GameState, calls into game.ts for every
-// transition, and hands the result to render.ts / audio.ts. No game rules and
-// no animation code live here.
-import { createGame, pressButton, STAGE_COUNT, type GameState } from "./game.ts";
-import { createRenderer } from "./render.ts";
-import { playCorrect, playWrong, playWin, playLose, primeAudio } from "./audio.ts";
+// Wiring only: owns the one mutable TowerState, calls into tower.ts for every
+// transition, and mounts/unmounts the active floor module. No game rules and
+// no floor-specific animation code live here.
+import {
+  createTower,
+  beginFloors,
+  clearFloor,
+  failFloor,
+  beginRewind,
+  finishRewind,
+  FLOOR_COUNT,
+  type TowerState,
+} from "./tower.ts";
+import { createOrbRail } from "./orbs.ts";
+import { playAwakening, playRewindFlash } from "./intro.ts";
+import { playEnding } from "./ending.ts";
+import { playAwaken, playFloorClear, playRewind, playEndingChord, primeAudio } from "./audio.ts";
+import type { FloorContext, FloorController } from "./floors/shared.ts";
+import * as floor1 from "./floors/floor1.ts";
+import * as floor2 from "./floors/floor2.ts";
+import * as floor3 from "./floors/floor3.ts";
+import * as floor4 from "./floors/floor4.ts";
+import * as floor5 from "./floors/floor5.ts";
+import * as floor6 from "./floors/floor6.ts";
+import * as floor7 from "./floors/floor7.ts";
+import * as floor8 from "./floors/floor8.ts";
+import * as floor9 from "./floors/floor9.ts";
 
-const stageEl = document.querySelector<HTMLElement>("#stage");
-const endScreen = document.querySelector<HTMLElement>("#end-screen");
-const endTitle = document.querySelector<HTMLElement>("#end-title");
-const endStats = document.querySelector<HTMLElement>("#end-stats");
+const FLOORS = [floor1, floor2, floor3, floor4, floor5, floor6, floor7, floor8, floor9];
+if (FLOORS.length !== FLOOR_COUNT) throw new Error("floor module count must match FLOOR_COUNT");
 
-if (!stageEl || !endScreen || !endTitle || !endStats) {
-  throw new Error("expected game markup is missing from index.html");
+const stageEl = document.querySelector<HTMLElement>("#floor-stage");
+const orbRailEl = document.querySelector<HTMLElement>("#orb-rail");
+const introOverlay = document.querySelector<HTMLElement>("#intro-overlay");
+const endingOverlay = document.querySelector<HTMLElement>("#ending-overlay");
+
+if (!stageEl || !orbRailEl || !introOverlay || !endingOverlay) {
+  throw new Error("expected tower markup is missing from index.html");
 }
 
-let state: GameState = createGame();
-let ending = false;
+// Unlock audio on the very first gesture, wherever it lands.
+window.addEventListener("pointerdown", primeAudio, { once: true });
+window.addEventListener("keydown", primeAudio, { once: true });
 
-const renderer = createRenderer(stageEl, {
-  onPress: handlePress,
-  onFirstGesture: primeAudio,
-});
+const orbRail = createOrbRail(orbRailEl);
 
-renderer.render(state, state.stage);
+// The wake-up intro plays once per browser tab; a death/rewind back to
+// Floor 1 later in the same session gets the brief flash instead.
+const SEEN_KEY = "ninefold-tower:seen";
+const firstRun = sessionStorage.getItem(SEEN_KEY) === null;
+sessionStorage.setItem(SEEN_KEY, "1");
 
-function handlePress(id: string): void {
-  if (ending || state.status === "won" || state.status === "lost") return;
+let state: TowerState = createTower(firstRun);
+let controller: FloorController | null = null;
 
-  const isCorrect = id === state.targetId;
-  const previous = state;
-  state = pressButton(state, id, Math.random, performance.now());
+void run();
 
-  if (isCorrect) {
-    renderer.pulseCorrect(id);
-    playCorrect();
-  } else {
-    renderer.pulseInvalid(id);
-    renderer.shake();
-    renderer.setDamage(state.mistakes);
-    playWrong();
+async function run(): Promise<void> {
+  orbRail.setCleared(state.cleared);
+
+  if (state.phase === "intro") {
+    playAwaken();
+    await playAwakening(introOverlay!);
+    state = beginFloors(state);
   }
 
-  if (state.status === "won" || state.status === "lost") {
-    void finish(state);
+  mountFloor();
+}
+
+function mountFloor(): void {
+  controller?.destroy();
+  const mod = FLOORS[state.floor]!;
+  const ctx: FloorContext = {
+    rng: Math.random,
+    onClear: handleClear,
+    onFail: handleFail,
+  };
+  controller = mod.mount(stageEl!, ctx);
+}
+
+function handleClear(): void {
+  playFloorClear(state.floor);
+  state = clearFloor(state);
+  orbRail.setCleared(state.cleared);
+
+  if (state.phase === "ending") {
+    controller?.destroy();
+    controller = null;
+    playEndingChord();
+    void orbRail.dissolve().then(() => playEnding(endingOverlay!, handleReplay));
     return;
   }
 
-  if (state.stage !== previous.stage) renderer.render(state, state.stage);
+  mountFloor();
 }
 
-async function finish(finished: GameState): Promise<void> {
-  ending = true;
-  const status = finished.status === "won" ? "won" : "lost";
-  if (status === "won") playWin();
-  else playLose();
-
-  await renderer.playEnding(status);
-  showEndScreen(finished);
+function handleFail(): void {
+  playRewind();
+  state = failFloor(state);
+  state = beginRewind(state);
+  void rewindAndRestart();
 }
 
-function showEndScreen(finished: GameState): void {
-  const elapsed = ((finished.finishedAt ?? 0) - (finished.startedAt ?? finished.finishedAt ?? 0)) / 1000;
-  const seconds = elapsed.toFixed(1);
-
-  if (finished.status === "won") {
-    endTitle!.textContent = "ONE WAS ENOUGH.";
-    endStats!.textContent = `${finished.mistakes} mistake${finished.mistakes === 1 ? "" : "s"} · ${seconds}s`;
-  } else {
-    endTitle!.textContent = "TOO MANY.";
-    endStats!.textContent = `${finished.stage} / ${STAGE_COUNT} · ${seconds}s`;
-  }
-
-  endScreen!.classList.add("is-visible");
-  window.setTimeout(armRestart, 500);
+async function rewindAndRestart(): Promise<void> {
+  controller?.destroy();
+  controller = null;
+  await playRewindFlash(introOverlay!);
+  await orbRail.playRewind();
+  state = finishRewind(state);
+  orbRail.setCleared(state.cleared);
+  mountFloor();
 }
 
-function armRestart(): void {
-  const restart = (): void => {
-    window.removeEventListener("keydown", restart);
-    endScreen!.classList.remove("is-visible");
-    renderer.reset();
-    ending = false;
-    state = createGame();
-    renderer.render(state, state.stage);
-  };
-  stageEl!.addEventListener("pointerdown", restart, { once: true });
-  window.addEventListener("keydown", restart, { once: true });
+function handleReplay(): void {
+  state = createTower(false);
+  orbRailEl!.classList.remove("orb-rail--fade");
+  orbRail.setCleared(state.cleared);
+  mountFloor();
 }
