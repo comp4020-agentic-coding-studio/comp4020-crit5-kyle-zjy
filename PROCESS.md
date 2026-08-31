@@ -1,9 +1,5 @@
 # Process overview
 
-<!-- TEMPLATE: this file is a shape to fill in, not a form. Replace everything
-     in it with your own overview, and delete this comment — `pnpm
-     check:evidence` will remind you if it's still here. -->
-
 A reading-guide to how the work came together --- a map to your process, not an
 essay about it. Markers read this file and follow its citations; they don't
 trawl the repo for evidence you didn't point at, so if a moment mattered, cite
@@ -17,45 +13,65 @@ cover every deliverable.
 
 ## What I built
 
-One paragraph: the thing, and the idea behind it.
+**ONE BUTTON TOO MANY** is a short perception game: one button on the page is
+real and always responds the same way; everything else is a decoy that
+multiplies and gets better at pretending. There is no instruction screen
+anywhere --- the only way to learn which button is real is to press one and
+watch what happens. The game teaches its own rules through nine stages of
+increasingly convincing deception (duplication, false similarity, shuffling,
+pointer mimicry, crowding), ends in one of two short, distinct sequences
+("ONE WAS ENOUGH." or "TOO MANY."), and never uses colour alone, an
+instructions modal, or a labelled/starred button to reveal the answer.
 
 ## The moments that mattered
 
-Three or four for an assignment; fewer is fine for a weekly prototype. Keep the
-list short so each moment has room to do all four jobs:
+1. **Decoy IDs would have broken the "shuffle" stage.**
+   The first draft of the state machine (`game.ts`) gave decoys a per-stage id
+   (`decoy-${stage}-${i}`), which is the obvious way to model "a new stage has
+   a new set of buttons." But the brief's shuffle stage needs a decoy that
+   survives a stage transition to be smoothly repositioned, not torn down and
+   recreated --- a fresh id per stage would make every stage transition look
+   like a hard cut. I checked that `STAGE_BUTTON_COUNT` never decreases, which
+   guarantees no slot is ever orphaned, and switched to slot-stable ids
+   (`decoy-${i}`) so the renderer's diff-by-id logic in `render.ts` can animate
+   continuity instead of despawning and respawning.
+   [`81c0ec1`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/81c0ec1)
 
-1. **what happened** --- the problem, or the thing that went wrong
-2. **what you did instead of the obvious thing** --- the call you made, and why
-   it beat the obvious one
-3. **how you knew it was right** --- the check you ran, the viewport you looked
-   at, what you read before accepting the diff
-4. **the citation** --- a commit or commit range, a `CLAUDE.md` change, a check
-   that went from red to green, a prompt paired with the commit it produced
+2. **A CSS class almost leaked which button was real.**
+   While writing `applyBehaviourClasses` in `render.ts`, I added
+   `classList.toggle("obtn--target", m.entity.isTarget)` out of habit ---
+   useful for debugging, and harmless as long as nothing styled it. But the
+   brief is explicit that nothing may give the answer away, and an unstyled
+   hook today is one CSS rule away from a giveaway tomorrow, and a `grep` away
+   from a marker or a curious player finding it in dev tools. I removed the
+   toggle entirely rather than leaving it "safe for now," and left a comment
+   explaining why `entity.isTarget` must never drive a class.
+   [`52053ab`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/52053ab)
 
-Jobs 2 and 3 are the ones the repo can't tell a reader on its own, so they're
-where the marks are. The strongest moments are the ones where a correction
-landed in the **harness** --- the standards and checks your work has to satisfy
---- rather than in a retry: a rule added to `CLAUDE.md`, a check wired up, an
-attempt thrown away. Retrying until it passes is the routine case, and changing
-what the work runs against is the skilled one.
+3. **Browser verification was blocked, so I fixed the sandbox instead of skipping the check.**
+   Playwright's headless Chromium failed to launch
+   (`libnspr4.so: cannot open shared object file`), and `apt-get install`
+   needed interactive sudo that wasn't available. Rather than reporting "typecheck
+   and unit tests pass" as if that were equivalent to seeing the game run, I
+   downloaded the four missing `.deb` packages with `apt-get download` (no root
+   required), extracted them with `dpkg-deb -x` into a scratch directory, and
+   pointed `LD_LIBRARY_PATH` at the extracted libraries. That got a real headless
+   browser working against the dev server: screenshots through all nine stages,
+   a forced loss (3 wrong presses), and a forced win (all stages cleared), with
+   zero console/page errors.
+   [`42cd499`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/42cd499)
 
-Cite each moment as a link whose text is the commit hash or range and whose
-target is this repo's commit or compare URL, so a reader clicks straight to the
-evidence:
-
-- one commit: [`a1b2c3d`](https://github.com/YOUR-ORG/YOUR-REPO/commit/a1b2c3d)
-- a range:
-  [`a1b2c3d...e4f5a6b`](https://github.com/YOUR-ORG/YOUR-REPO/compare/a1b2c3d...e4f5a6b)
-
-To pair a prompt with the commit it produced, quote the prompt (curated, not a
-full transcript) next to the citation:
-
-> the prompt, verbatim
-
-Screenshots are welcome where one carries the verification better than a
-sentence does. Commit the file to this repo and link it with a **relative**
-path, which is what makes it render on GitHub: `![alt text](docs/before.png)`.
-Images don't count towards the word count and don't replace the citation.
+4. **The win screen's own screenshot caught a real bug.**
+   The forced-win screenshot showed the settled target button sitting fully
+   opaque, dead centre, directly behind the "0 mistakes · 4.6s" stats line ---
+   legible, but visually competing with the text it was supposed to sit behind.
+   I hadn't noticed this from reading the animation code; it only showed up once
+   I looked at the rendered frame. Fixed by fading the settled button's opacity
+   to 0.28 in the same transition that scales it down
+   (`render.ts`'s `playWinEnding`), so it reads as a dim, settled artifact
+   instead of competing with the end-screen text. Re-ran the same screenshot
+   script to confirm the fix before committing.
+   [`42cd499`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-kyle-zjy/commit/42cd499)
 
 ## Before you ship
 
